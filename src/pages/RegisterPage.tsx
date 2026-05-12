@@ -1,9 +1,7 @@
 import { Moon, Sun } from 'lucide-react';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { CircleMarker, MapContainer, TileLayer, useMapEvents } from 'react-leaflet';
 import { Link, useNavigate } from 'react-router-dom';
-import type { LatLngTuple, LeafletMouseEvent } from 'leaflet';
 import type { AuthResult } from '../services/auth';
 import { registerSupplier } from '../services/auth';
 
@@ -47,29 +45,9 @@ function formatPhone(value: string) {
     .replace(/(\d{5})(\d{1,4})$/, '$1-$2');
 }
 
-function CoordinatePicker({
-  position,
-  onChange,
-}: {
-  position: LatLngTuple | null;
-  onChange: (coords: LatLngTuple) => void;
-}) {
-  useMapEvents({
-    click(event: LeafletMouseEvent) {
-      onChange([event.latlng.lat, event.latlng.lng]);
-    },
-  });
-
-  if (!position) {
-    return null;
-  }
-
-  return <CircleMarker center={position} radius={8} pathOptions={{ color: '#00ff66', fillOpacity: 0.8 }} />;
-}
 
 export function RegisterPage({ theme, toggleTheme, onRegister }: RegisterPageProps) {
   const navigate = useNavigate();
-  const initialCenter: LatLngTuple = [-23.5505, -46.6333];
   const [form, setForm] = useState<RegisterFormState>({
     empresaNome: '',
     cnpj: '',
@@ -80,7 +58,6 @@ export function RegisterPage({ theme, toggleTheme, onRegister }: RegisterPagePro
     adminEmail: '',
     adminSenha: '',
   });
-  const [coordinates, setCoordinates] = useState<LatLngTuple | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -115,9 +92,6 @@ export function RegisterPage({ theme, toggleTheme, onRegister }: RegisterPagePro
     if (form.adminSenha.length < 8) {
       nextErrors.adminSenha = 'A senha deve ter no minimo 8 caracteres.';
     }
-    if (!coordinates) {
-      nextErrors.coordinates = 'Clique no mapa para capturar latitude e longitude.';
-    }
 
     return nextErrors;
   };
@@ -128,7 +102,7 @@ export function RegisterPage({ theme, toggleTheme, onRegister }: RegisterPagePro
 
     const validationErrors = validateForm();
     setErrors(validationErrors);
-    if (Object.keys(validationErrors).length > 0 || !coordinates) {
+    if (Object.keys(validationErrors).length > 0) {
       return;
     }
 
@@ -143,8 +117,8 @@ export function RegisterPage({ theme, toggleTheme, onRegister }: RegisterPagePro
         adminNome: form.adminNome.trim(),
         adminEmail: form.adminEmail.trim(),
         adminSenha: form.adminSenha,
-        latitude: coordinates[0],
-        longitude: coordinates[1],
+        latitude: -23.5505,
+        longitude: -46.6333,
       });
 
       onRegister(auth);
@@ -157,42 +131,39 @@ export function RegisterPage({ theme, toggleTheme, onRegister }: RegisterPagePro
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#050505] dark:bg-[#050505] light:bg-gray-50 transition-colors duration-300 flex items-center justify-center px-4">
+    <div className="min-h-screen w-full bg-[#050505] dark:bg-[#050505] light:bg-gray-50 transition-colors duration-300 flex flex-col items-center justify-start md:justify-center px-4 py-8 md:py-12">
       <button
         type="button"
         onClick={toggleTheme}
-        className="absolute top-5 right-5 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] light:border-gray-300 bg-[#141414] dark:bg-[#141414] light:bg-white text-gray-300 light:text-gray-700 hover:text-[#00ff66] transition-colors"
+        className="fixed top-4 right-4 sm:top-5 sm:right-5 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-[#2a2a2a] light:border-gray-300 bg-[#141414] dark:bg-[#141414] light:bg-white text-gray-300 light:text-gray-700 hover:text-[#00ff66] transition-colors z-10"
       >
         {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-        <span className="text-sm font-medium">{theme === 'dark' ? 'Modo Claro' : 'Modo Escuro'}</span>
+        <span className="text-xs sm:text-sm font-medium">{theme === 'dark' ? 'Modo Claro' : 'Modo Escuro'}</span>
       </button>
 
-      <div className="w-full max-w-2xl bg-[#141414] dark:bg-[#141414] light:bg-white border border-[#222222] light:border-gray-200 rounded-2xl p-6 md:p-8 shadow-card">
+      <div className="w-full max-w-2xl bg-[#141414] dark:bg-[#141414] light:bg-white border border-[#222222] light:border-gray-200 rounded-2xl p-6 shadow-card">
         <div className="mb-6">
-          <div className="w-10 h-10 bg-[#00ff66] rounded-lg flex items-center justify-center mb-3">
-            <span className="text-black font-bold">R</span>
-          </div>
           <h1 className="text-2xl font-bold !text-white dark:!text-white light:!text-gray-900">Criar conta</h1>
-          <p className="text-sm text-gray-400 light:text-gray-500 mt-1">Cadastre empresa, admin e coordenadas do endereco.</p>
+          <p className="text-sm text-gray-400 light:text-gray-500 mt-1">Cadastre sua empresa e administrador.</p>
         </div>
 
         <form onSubmit={handleRegister} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="empresaNome" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-1">Nome da empresa</label>
+            <div className="md:col-span-2">
+              <label htmlFor="empresaNome" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-2">Nome da empresa</label>
               <input
                 id="empresaNome"
                 type="text"
                 value={form.empresaNome}
                 onChange={event => setForm(current => ({ ...current, empresaNome: event.target.value }))}
-                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-3 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
+                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-3 py-2 text-sm text-white dark:text-white light:text-gray-900"
                 placeholder="Distribuidora Exemplo"
               />
               {errors.empresaNome && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.empresaNome}</p>}
             </div>
 
             <div>
-              <label htmlFor="cnpj" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-1">CNPJ</label>
+              <label htmlFor="cnpj" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-2">CNPJ</label>
               <input
                 id="cnpj"
                 type="text"
@@ -200,27 +171,14 @@ export function RegisterPage({ theme, toggleTheme, onRegister }: RegisterPagePro
                 onChange={event => setForm(current => ({ ...current, cnpj: formatCnpj(event.target.value) }))}
                 inputMode="numeric"
                 maxLength={18}
-                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-3 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
+                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-4 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
                 placeholder="00.000.000/0001-00"
               />
               {errors.cnpj && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.cnpj}</p>}
             </div>
 
-            <div className="md:col-span-2">
-              <label htmlFor="endereco" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-1">Endereco</label>
-              <input
-                id="endereco"
-                type="text"
-                value={form.endereco}
-                onChange={event => setForm(current => ({ ...current, endereco: event.target.value }))}
-                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-3 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
-                placeholder="Rua, numero, bairro, cidade"
-              />
-              {errors.endereco && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.endereco}</p>}
-            </div>
-
             <div>
-              <label htmlFor="telefone" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-1">Telefone</label>
+              <label htmlFor="telefone" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-2">Telefone</label>
               <input
                 id="telefone"
                 type="text"
@@ -228,83 +186,78 @@ export function RegisterPage({ theme, toggleTheme, onRegister }: RegisterPagePro
                 onChange={event => setForm(current => ({ ...current, telefone: formatPhone(event.target.value) }))}
                 inputMode="numeric"
                 maxLength={15}
-                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-3 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
+                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-4 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
                 placeholder="(11) 99999-9999"
               />
               {errors.telefone && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.telefone}</p>}
             </div>
 
+            <div className="md:col-span-2">
+              <label htmlFor="endereco" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-2">Endereco</label>
+              <input
+                id="endereco"
+                type="text"
+                value={form.endereco}
+                onChange={event => setForm(current => ({ ...current, endereco: event.target.value }))}
+                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-4 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
+                placeholder="Rua, numero, bairro, cidade"
+              />
+              {errors.endereco && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.endereco}</p>}
+            </div>
+
             <div>
-              <label htmlFor="empresaEmail" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-1">E-mail da empresa</label>
+              <label htmlFor="empresaEmail" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-2">E-mail da empresa</label>
               <input
                 id="empresaEmail"
                 type="email"
                 value={form.empresaEmail}
                 onChange={event => setForm(current => ({ ...current, empresaEmail: event.target.value }))}
-                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-3 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
+                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-4 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
                 placeholder="contato@empresa.com"
               />
               {errors.empresaEmail && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.empresaEmail}</p>}
             </div>
 
             <div>
-              <label htmlFor="adminNome" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-1">Nome do admin</label>
+              <label htmlFor="adminNome" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-2">Nome do admin</label>
               <input
                 id="adminNome"
                 type="text"
                 value={form.adminNome}
                 onChange={event => setForm(current => ({ ...current, adminNome: event.target.value }))}
-                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-3 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
+                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-4 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
                 placeholder="Nome do responsavel"
               />
               {errors.adminNome && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.adminNome}</p>}
             </div>
 
             <div>
-              <label htmlFor="adminEmail" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-1">E-mail do admin</label>
+              <label htmlFor="adminEmail" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-2">E-mail do admin</label>
               <input
                 id="adminEmail"
                 type="email"
                 value={form.adminEmail}
                 onChange={event => setForm(current => ({ ...current, adminEmail: event.target.value }))}
-                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-3 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
+                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-4 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
                 placeholder="admin@empresa.com"
               />
               {errors.adminEmail && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.adminEmail}</p>}
             </div>
 
             <div className="md:col-span-2">
-              <label htmlFor="adminSenha" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-1">Senha do admin</label>
+              <label htmlFor="adminSenha" className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-2">Senha do admin</label>
               <input
                 id="adminSenha"
                 type="password"
                 value={form.adminSenha}
                 onChange={event => setForm(current => ({ ...current, adminSenha: event.target.value }))}
-                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-3 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
+                className="w-full rounded-lg bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-4 py-2.5 text-sm text-white dark:text-white light:text-gray-900"
                 placeholder="Minimo 8 caracteres"
               />
               {errors.adminSenha && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.adminSenha}</p>}
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-200 light:text-gray-700 mb-2">Coordenadas no mapa (lat/lng)</label>
-            <div className="h-56 overflow-hidden rounded-lg border border-[#2a2a2a] light:border-gray-300">
-              <MapContainer center={initialCenter} zoom={11} style={{ height: '100%', width: '100%' }}>
-                <TileLayer
-                  attribution='&copy; OpenStreetMap contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <CoordinatePicker position={coordinates} onChange={setCoordinates} />
-              </MapContainer>
-            </div>
-            <p className="mt-2 text-xs text-gray-400 light:text-gray-600">
-              {coordinates
-                ? `Lat: ${coordinates[0].toFixed(6)} | Lng: ${coordinates[1].toFixed(6)}`
-                : 'Clique no mapa para definir as coordenadas do endereco.'}
-            </p>
-            {errors.coordinates && <p className="mt-1 text-xs text-red-400 light:text-red-700">{errors.coordinates}</p>}
-          </div>
 
           {submitError && (
             <p className="text-sm text-red-400 light:text-red-700">{submitError}</p>
@@ -313,13 +266,13 @@ export function RegisterPage({ theme, toggleTheme, onRegister }: RegisterPagePro
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-lg bg-[#00ff66] text-black font-semibold py-2.5 hover:brightness-95 transition"
+            className="w-full rounded-lg bg-[#00ff66] text-black font-semibold py-2.5 text-base hover:brightness-95 transition mt-4"
           >
             {isSubmitting ? 'Finalizando...' : 'Finalizar cadastro'}
           </button>
         </form>
 
-        <p className="text-sm text-gray-400 light:text-gray-600 mt-5 text-center">
+        <p className="text-sm text-gray-400 light:text-gray-600 mt-4 text-center">
           Ja possui conta?{' '}
           <Link to="/login" className="text-[#00ff66] font-medium hover:underline">
             Entrar
