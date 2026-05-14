@@ -18,9 +18,11 @@ export interface Order {
 }
 
 export interface StockItem {
+  codigo: string;
   produto: string;
   total: number;
   reservado: number;
+  fotoUrl?: string;
 }
 
 export interface OrderTimelineEvent {

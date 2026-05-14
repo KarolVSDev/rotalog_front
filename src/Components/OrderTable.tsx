@@ -305,15 +305,15 @@ export function OrderTable({ stock, setStock, onRegisterStockMovements }: OrderT
           </div>
         )}
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[520px]">
           <table className="w-full min-w-[680px]">
             <thead>
               <tr className="border-b border-[#222222] light:border-gray-200 text-left">
-                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500">Pedido</th>
-                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500">Cliente</th>
-                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500">Valor</th>
-                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500">Status</th>
-                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500">Acoes</th>
+                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500 sticky top-0 z-10 bg-[#141414] dark:bg-[#141414] light:bg-white">Pedido</th>
+                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500 sticky top-0 z-10 bg-[#141414] dark:bg-[#141414] light:bg-white">Cliente</th>
+                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500 sticky top-0 z-10 bg-[#141414] dark:bg-[#141414] light:bg-white">Valor</th>
+                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500 sticky top-0 z-10 bg-[#141414] dark:bg-[#141414] light:bg-white">Status</th>
+                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500 sticky top-0 z-10 bg-[#141414] dark:bg-[#141414] light:bg-white">Acoes</th>
               </tr>
             </thead>
             <tbody>

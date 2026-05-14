@@ -12,6 +12,14 @@ interface DashboardPageProps {
   companyName: string;
 }
 
+const topNavItems: Array<{ section: DashboardSection; label: string }> = [
+  { section: 'VISAO_GERAL', label: 'Visão geral' },
+  { section: 'PEDIDOS', label: 'Pedidos' },
+  { section: 'ESTOQUE', label: 'Estoque' },
+  { section: 'ENTREGAS', label: 'Entregas' },
+  { section: 'RELATORIOS', label: 'Relatórios' },
+];
+
 export function DashboardPage({ theme, toggleTheme, onLogout, companyName }: DashboardPageProps) {
   const [activeSection, setActiveSection] = useState<DashboardSection>('VISAO_GERAL');
   const [stock, setStock] = useState(mockStock);
@@ -168,6 +176,26 @@ export function DashboardPage({ theme, toggleTheme, onLogout, companyName }: Das
       />
 
       <main className="flex-1 p-4 md:p-8 overflow-x-hidden">
+        <div className="mb-6 rounded-xl border border-[#222222] light:border-gray-200 bg-[#0d0d0d] dark:bg-[#0d0d0d] light:bg-white p-4">
+          <p className="text-xs text-gray-400 light:text-gray-600 mb-3">Dashboard / Visão geral</p>
+          <nav className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            {topNavItems.map(item => (
+              <button
+                key={item.section}
+                type="button"
+                onClick={() => setActiveSection(item.section)}
+                className={`px-3 py-2.5 rounded-md text-sm font-medium transition-colors text-center ${
+                  activeSection === item.section
+                    ? 'bg-[#00ff66]/10 text-[#00ff66] light:bg-green-100 light:text-green-700 border border-[#00ff66]/30'
+                    : 'bg-[#141414] dark:bg-[#141414] light:bg-gray-50 text-gray-400 light:text-gray-700 border border-[#2a2a2a] light:border-gray-200 hover:text-gray-200 light:hover:text-gray-900'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
         <div className="mb-8 flex flex-col md:flex-row items-start md:items-center justify-between bg-[#00ff66]/10 border border-[#00ff66]/20 p-4 rounded-xl gap-4">
           <div className="flex items-center gap-3">
             <div className="w-2 h-2 rounded-full bg-[#00ff66] animate-pulse" />

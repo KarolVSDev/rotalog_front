@@ -11,6 +11,14 @@ interface StockManagementSectionProps {
 }
 
 type EditableRowState = Record<string, { total: string; reserved: string }>;
+type ProductEditState = {
+  originalCodigo: string;
+  codigo: string;
+  produto: string;
+  total: string;
+  reservado: string;
+  fotoUrl: string;
+};
 
 const movementTypeLabels: Record<StockMovementType, string> = {
   ENTRY: 'Entrada',
@@ -41,6 +49,15 @@ function toInputDate(isoDate: string) {
   return `${year}-${month}-${day}`;
 }
 
+async function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(new Error('Falha ao carregar imagem.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export function StockManagementSection({ stock, setStock, movements, onRegisterMovements }: StockManagementSectionProps) {
   const [editableRows, setEditableRows] = useState<EditableRowState>({});
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
@@ -48,6 +65,13 @@ export function StockManagementSection({ stock, setStock, movements, onRegisterM
   const [movementTypeFilter, setMovementTypeFilter] = useState<'ALL' | StockMovementType>('ALL');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [showOnlyLowStock, setShowOnlyLowStock] = useState(false);
+  const [showMovementHistory, setShowMovementHistory] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showNewProductForm, setShowNewProductForm] = useState(false);
+  const [newProduct, setNewProduct] = useState({ codigo: '', produto: '', total: '0', reservado: '0', fotoUrl: '' });
+  const [editingProduct, setEditingProduct] = useState<ProductEditState | null>(null);
+  const [editModalError, setEditModalError] = useState('');
 
   useEffect(() => {
     const nextEditableRows = stock.reduce<EditableRowState>((acc, item) => {
@@ -154,6 +178,7 @@ export function StockManagementSection({ stock, setStock, movements, onRegisterM
     const productIndex = headers.findIndex(h => h === 'produto' || h === 'product');
     const totalIndex = headers.findIndex(h => h === 'total_quantity' || h === 'total');
     const reservedIndex = headers.findIndex(h => h === 'reserved_quantity' || h === 'reserved' || h === 'reservado');
+    const codeIndex = headers.findIndex(h => h === 'codigo' || h === 'code' || h === 'sku');
 
     if (productIndex === -1 || totalIndex === -1 || reservedIndex === -1) {
       setImportFeedback('Cabecalho invalido. Use: produto,total_quantity,reserved_quantity');
@@ -162,7 +187,9 @@ export function StockManagementSection({ stock, setStock, movements, onRegisterM
 
     const parsedRows = lines.slice(1).map(line => {
       const cols = line.split(',').map(col => col.trim());
+      const fallbackCode = `CSV-${cols[productIndex]?.replace(/\s+/g, '-').toUpperCase()}`;
       return {
+        codigo: codeIndex >= 0 ? cols[codeIndex] : fallbackCode,
         produto: cols[productIndex],
         total: Number(cols[totalIndex]),
         reservado: Number(cols[reservedIndex]),
@@ -182,7 +209,12 @@ export function StockManagementSection({ stock, setStock, movements, onRegisterM
 
         const previous = byProduct.get(row.produto);
         if (!previous) {
-          byProduct.set(row.produto, { produto: row.produto, total: row.total, reservado: row.reservado });
+          byProduct.set(row.produto, {
+            codigo: row.codigo,
+            produto: row.produto,
+            total: row.total,
+            reservado: row.reservado,
+          });
           updatedCount += 1;
 
           if (row.total > 0) {
@@ -276,8 +308,207 @@ export function StockManagementSection({ stock, setStock, movements, onRegisterM
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [movements, movementTypeFilter, startDate, endDate]);
 
+  const filteredStock = stock.filter(item => {
+    const available = item.total - item.reservado;
+    const isLowStock = available <= 20;
+
+    if (showOnlyLowStock && !isLowStock) {
+      return false;
+    }
+
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      const matchesCodigo = item.codigo.toLowerCase().includes(searchLower);
+      const matchesProduto = item.produto.toLowerCase().includes(searchLower);
+      
+      if (!matchesCodigo && !matchesProduto) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  const handleAddNewProduct = () => {
+    const { codigo, produto, total, reservado, fotoUrl } = newProduct;
+
+    if (!codigo.trim() || !produto.trim()) {
+      setImportFeedback('Código e descrição são obrigatórios.');
+      return;
+    }
+
+    const totalNum = Number(total);
+    const reservadoNum = Number(reservado);
+
+    if (!Number.isFinite(totalNum) || !Number.isFinite(reservadoNum) || totalNum < 0 || reservadoNum < 0) {
+      setImportFeedback('Valores inválidos. Use números positivos.');
+      return;
+    }
+
+    if (reservadoNum > totalNum) {
+      setImportFeedback('Reservado não pode ser maior que total.');
+      return;
+    }
+
+    // Check if product already exists
+    if (stock.some(item => item.codigo.toLowerCase() === codigo.toLowerCase())) {
+      setImportFeedback('Produto com este código já existe.');
+      return;
+    }
+
+    setStock(currentStock => [
+      ...currentStock,
+      {
+        codigo,
+        produto,
+        total: totalNum,
+        reservado: reservadoNum,
+        fotoUrl: fotoUrl || undefined,
+      },
+    ]);
+
+    // Register movement
+    const movementsToRegister: Array<Omit<StockMovement, 'id' | 'createdAt'>> = [];
+    if (totalNum > 0) {
+      movementsToRegister.push({
+        product: produto,
+        type: 'ENTRY',
+        quantity: totalNum,
+        source: 'Novo produto cadastrado',
+      });
+    }
+    if (reservadoNum > 0) {
+      movementsToRegister.push({
+        product: produto,
+        type: 'RESERVATION',
+        quantity: reservadoNum,
+        source: 'Novo produto cadastrado',
+      });
+    }
+
+    if (movementsToRegister.length > 0) {
+      onRegisterMovements(movementsToRegister);
+    }
+
+    setImportFeedback(`Produto "${produto}" cadastrado com sucesso!`);
+    setNewProduct({ codigo: '', produto: '', total: '0', reservado: '0', fotoUrl: '' });
+    setShowNewProductForm(false);
+  };
+
+  const handleOpenEditModal = (item: StockItem) => {
+    setEditModalError('');
+    setEditingProduct({
+      originalCodigo: item.codigo,
+      codigo: item.codigo,
+      produto: item.produto,
+      total: String(item.total),
+      reservado: String(item.reservado),
+      fotoUrl: item.fotoUrl ?? '',
+    });
+  };
+
+  const handleSaveProductFromModal = () => {
+    if (!editingProduct) {
+      return;
+    }
+
+    const codigo = editingProduct.codigo.trim();
+    const produto = editingProduct.produto.trim();
+    const total = Number(editingProduct.total);
+    const reservado = Number(editingProduct.reservado);
+    const fotoUrl = editingProduct.fotoUrl.trim();
+
+    if (!codigo || !produto) {
+      setEditModalError('Código e descrição são obrigatórios.');
+      return;
+    }
+
+    if (!Number.isFinite(total) || !Number.isFinite(reservado) || total < 0 || reservado < 0) {
+      setEditModalError('Valores inválidos. Use números positivos.');
+      return;
+    }
+
+    if (reservado > total) {
+      setEditModalError('Reservado não pode ser maior que total.');
+      return;
+    }
+
+    const duplicateCode = stock.some(
+      item => item.codigo.toLowerCase() === codigo.toLowerCase() && item.codigo !== editingProduct.originalCodigo,
+    );
+    if (duplicateCode) {
+      setEditModalError('Já existe um produto com este código.');
+      return;
+    }
+
+    const previous = stock.find(item => item.codigo === editingProduct.originalCodigo);
+    if (!previous) {
+      setEditModalError('Produto não encontrado para edição.');
+      return;
+    }
+
+    const totalDiff = total - previous.total;
+    const reservedDiff = reservado - previous.reservado;
+    const movementsToRegister: Array<Omit<StockMovement, 'id' | 'createdAt'>> = [];
+
+    if (totalDiff > 0) {
+      movementsToRegister.push({
+        product: produto,
+        type: 'ENTRY',
+        quantity: totalDiff,
+        source: 'Ajuste via edição do produto',
+      });
+    } else if (totalDiff < 0) {
+      movementsToRegister.push({
+        product: produto,
+        type: 'EXIT',
+        quantity: Math.abs(totalDiff),
+        source: 'Ajuste via edição do produto',
+      });
+    }
+
+    if (reservedDiff > 0) {
+      movementsToRegister.push({
+        product: produto,
+        type: 'RESERVATION',
+        quantity: reservedDiff,
+        source: 'Ajuste via edição do produto',
+      });
+    } else if (reservedDiff < 0) {
+      movementsToRegister.push({
+        product: produto,
+        type: 'RELEASE',
+        quantity: Math.abs(reservedDiff),
+        source: 'Ajuste via edição do produto',
+      });
+    }
+
+    setStock(currentStock =>
+      currentStock.map(item =>
+        item.codigo === editingProduct.originalCodigo
+          ? {
+              ...item,
+              codigo,
+              produto,
+              total,
+              reservado,
+              fotoUrl: fotoUrl || undefined,
+            }
+          : item,
+      ),
+    );
+
+    if (movementsToRegister.length > 0) {
+      onRegisterMovements(movementsToRegister);
+    }
+
+    setImportFeedback(`Produto "${produto}" atualizado com sucesso.`);
+    setEditingProduct(null);
+    setEditModalError('');
+  };
+
   return (
-    <div className="mt-8 grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-6">
+    <div className="mt-8">
       <section className="bg-[#141414] dark:bg-[#141414] light:bg-white border border-[#222222] light:border-gray-200 rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-[#222222] light:border-gray-200 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
@@ -285,20 +516,139 @@ export function StockManagementSection({ stock, setStock, movements, onRegisterM
             <p className="text-sm text-gray-500 light:text-gray-600">Disponivel = Total - Reservado</p>
           </div>
 
-          <label className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-md border border-[#2a2a2a] light:border-gray-300 text-gray-300 light:text-gray-700 cursor-pointer">
-            Importar CSV
-            <input type="file" accept=".csv" className="hidden" onChange={handleImportCsv} />
-          </label>
+          <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center w-full md:w-auto">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md border border-[#2a2a2a] light:border-gray-300 bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 flex-1 md:flex-none">
+              <span className="text-gray-500">🔍</span>
+              <input
+                type="text"
+                placeholder="Buscar código ou produto..."
+                value={searchTerm}
+                onChange={event => setSearchTerm(event.target.value)}
+                className="bg-transparent text-xs text-white dark:text-white light:text-gray-900 outline-none flex-1 md:w-48"
+              />
+            </div>
+            <label className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-md border border-[#2a2a2a] light:border-gray-300 text-gray-300 light:text-gray-700 cursor-pointer hover:bg-[#1a1a1a] dark:hover:bg-[#1a1a1a] light:hover:bg-gray-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={showOnlyLowStock}
+                onChange={event => setShowOnlyLowStock(event.target.checked)}
+                className="w-4 h-4 cursor-pointer"
+              />
+              <span>Apenas baixo estoque</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowNewProductForm(!showNewProductForm)}
+              className="text-xs px-3 py-2 rounded-md border border-[#2a2a2a] light:border-gray-300 text-gray-300 light:text-gray-700 hover:bg-[#1a1a1a] dark:hover:bg-[#1a1a1a] light:hover:bg-gray-100 transition-colors"
+            >
+              {showNewProductForm ? '✕ Cancelar' : '+ Novo produto'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowMovementHistory(!showMovementHistory)}
+              className="text-xs px-3 py-2 rounded-md border border-[#2a2a2a] light:border-gray-300 text-gray-300 light:text-gray-700 hover:bg-[#1a1a1a] dark:hover:bg-[#1a1a1a] light:hover:bg-gray-100 transition-colors"
+            >
+              {showMovementHistory ? '✕ Fechar histórico' : '+ Histórico de movimentações'}
+            </button>
+            <label className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-md border border-[#2a2a2a] light:border-gray-300 text-gray-300 light:text-gray-700 cursor-pointer hover:bg-[#1a1a1a] dark:hover:bg-[#1a1a1a] light:hover:bg-gray-100 transition-colors">
+              Importar CSV
+              <input type="file" accept=".csv" className="hidden" onChange={handleImportCsv} />
+            </label>
+          </div>
         </div>
 
         {importFeedback && (
           <p className="px-5 py-3 text-sm text-[#00ff66] light:text-green-700 border-b border-[#222222] light:border-gray-200">{importFeedback}</p>
         )}
 
+        {showNewProductForm && (
+          <div className="px-5 py-4 bg-[#0a0a0a] dark:bg-[#0a0a0a] light:bg-gray-50 border-b border-[#222222] light:border-gray-200">
+            <h3 className="text-sm font-semibold !text-white dark:!text-white light:!text-gray-900 mb-3">Cadastrar novo produto</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+              <div>
+                <label className="text-xs text-gray-400 light:text-gray-600">Código</label>
+                <input
+                  type="text"
+                  value={newProduct.codigo}
+                  onChange={event => setNewProduct({ ...newProduct, codigo: event.target.value })}
+                  placeholder="Ex: ARR001"
+                  className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900 mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 light:text-gray-600">Descrição</label>
+                <input
+                  type="text"
+                  value={newProduct.produto}
+                  onChange={event => setNewProduct({ ...newProduct, produto: event.target.value })}
+                  placeholder="Ex: Arroz 5kg"
+                  className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900 mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 light:text-gray-600">Total</label>
+                <input
+                  type="number"
+                  value={newProduct.total}
+                  onChange={event => setNewProduct({ ...newProduct, total: event.target.value })}
+                  min={0}
+                  className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900 mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 light:text-gray-600">Reservado</label>
+                <input
+                  type="number"
+                  value={newProduct.reservado}
+                  onChange={event => setNewProduct({ ...newProduct, reservado: event.target.value })}
+                  min={0}
+                  className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900 mt-1"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 light:text-gray-600">Foto</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={async event => {
+                    const file = event.target.files?.[0];
+                    if (!file) {
+                      return;
+                    }
+                    try {
+                      const foto = await fileToDataUrl(file);
+                      setNewProduct(current => ({ ...current, fotoUrl: foto }));
+                    } catch {
+                      setImportFeedback('Nao foi possivel carregar a foto do produto.');
+                    }
+                    event.target.value = '';
+                  }}
+                  className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-1.5 text-xs text-white dark:text-white light:text-gray-900 mt-1 file:mr-2 file:border-0 file:bg-transparent file:text-xs file:text-gray-400"
+                />
+                {newProduct.fotoUrl && (
+                  <img
+                    src={newProduct.fotoUrl}
+                    alt="Preview do produto"
+                    className="mt-2 h-14 w-14 rounded-md object-cover border border-[#2a2a2a] light:border-gray-300"
+                  />
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddNewProduct}
+              className="text-xs px-3 py-2 rounded-md bg-[#00ff66]/15 text-[#00ff66] light:bg-green-100 light:text-green-700 hover:bg-[#00ff66]/25 transition-colors mt-3"
+            >
+              ✓ Cadastrar produto
+            </button>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px]">
             <thead>
               <tr className="border-b border-[#222222] light:border-gray-200 text-left">
+                <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500">Código</th>
                 <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500">Produto</th>
                 <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500">Total</th>
                 <th className="px-5 py-3 text-xs uppercase tracking-wide text-gray-500">Reservado</th>
@@ -307,14 +657,22 @@ export function StockManagementSection({ stock, setStock, movements, onRegisterM
               </tr>
             </thead>
             <tbody>
-              {stock.map(item => {
+              {filteredStock.map(item => {
                 const available = item.total - item.reservado;
                 const isLowStock = available <= 20;
                 const rowEdit = editableRows[item.produto] ?? { total: String(item.total), reserved: String(item.reservado) };
 
                 return (
-                  <tr key={item.produto} className="border-b border-[#222222] light:border-gray-200">
-                    <td className="px-5 py-4 text-sm text-white dark:text-white light:text-gray-900">{item.produto}</td>
+                  <tr key={item.produto} className={`border-b border-[#222222] light:border-gray-200 transition-colors ${isLowStock ? 'bg-amber-500/10 dark:bg-amber-500/10 light:bg-amber-50' : ''}`}>
+                    <td className="px-5 py-4 text-sm text-gray-400 light:text-gray-600">
+                      {item.codigo}
+                    </td>
+                    <td className={`px-5 py-4 text-sm ${isLowStock ? 'text-amber-300 dark:text-amber-300 light:text-amber-800 font-semibold' : 'text-white dark:text-white light:text-gray-900'}`}>
+                      <div className="flex items-center gap-2">
+                        {isLowStock && <span className="text-amber-400 dark:text-amber-400 light:text-amber-700">⚠</span>}
+                        {item.produto}
+                      </div>
+                    </td>
                     <td className="px-5 py-4 text-sm">
                       <input
                         type="number"
@@ -351,18 +709,33 @@ export function StockManagementSection({ stock, setStock, movements, onRegisterM
                         className="w-24 rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-1 text-xs text-white dark:text-white light:text-gray-900"
                       />
                     </td>
-                    <td className={`px-5 py-4 text-sm ${isLowStock ? 'text-amber-400 light:text-amber-700 font-semibold' : 'text-gray-300 light:text-gray-700'}`}>
-                      {available}
-                      {isLowStock && <span className="ml-2 text-xs">(baixo)</span>}
+                    <td className={`px-5 py-4 text-sm ${isLowStock ? 'bg-amber-500/20 dark:bg-amber-500/20 light:bg-amber-100' : ''}`}>
+                      {isLowStock ? (
+                        <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-amber-500/30 dark:bg-amber-500/30 light:bg-amber-200 border border-amber-400 dark:border-amber-400 light:border-amber-600">
+                          <span className="font-semibold text-amber-300 dark:text-amber-300 light:text-amber-900">{available}</span>
+                          <span className="text-xs text-amber-400 dark:text-amber-400 light:text-amber-700 font-semibold">CRÍTICO</span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-300 light:text-gray-700">{available}</span>
+                      )}
                     </td>
                     <td className="px-5 py-4 text-sm">
-                      <button
-                        type="button"
-                        onClick={() => handleSaveRow(item.produto)}
-                        className="text-xs px-2.5 py-1 rounded-md bg-[#00ff66]/15 text-[#00ff66] light:bg-green-100 light:text-green-700 hover:bg-[#00ff66]/25 transition-colors"
-                      >
-                        Salvar
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveRow(item.produto)}
+                          className="text-xs px-2.5 py-1 rounded-md bg-[#00ff66]/15 text-[#00ff66] light:bg-green-100 light:text-green-700 hover:bg-[#00ff66]/25 transition-colors"
+                        >
+                          Salvar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditModal(item)}
+                          className="text-xs px-2.5 py-1 rounded-md bg-sky-500/15 text-sky-300 light:bg-sky-100 light:text-sky-700 hover:bg-sky-500/25 transition-colors"
+                        >
+                          Editar
+                        </button>
+                      </div>
                       {rowErrors[item.produto] && (
                         <p className="mt-1 text-xs text-red-400 light:text-red-700">{rowErrors[item.produto]}</p>
                       )}
@@ -373,57 +746,174 @@ export function StockManagementSection({ stock, setStock, movements, onRegisterM
             </tbody>
           </table>
         </div>
-      </section>
 
-      <section className="bg-[#141414] dark:bg-[#141414] light:bg-white border border-[#222222] light:border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-[#222222] light:border-gray-200">
-          <h2 className="text-lg font-semibold !text-white dark:!text-white light:!text-gray-900">Historico de movimentacoes</h2>
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <select
-              value={movementTypeFilter}
-              onChange={event => setMovementTypeFilter(event.target.value as 'ALL' | StockMovementType)}
-              className="rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900"
-            >
-              <option value="ALL">Todos os tipos</option>
-              <option value="ENTRY">ENTRY</option>
-              <option value="RESERVATION">RESERVATION</option>
-              <option value="RELEASE">RELEASE</option>
-              <option value="EXIT">EXIT</option>
-            </select>
-            <input
-              type="date"
-              value={startDate}
-              onChange={event => setStartDate(event.target.value)}
-              className="rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900"
-            />
-            <input
-              type="date"
-              value={endDate}
-              onChange={event => setEndDate(event.target.value)}
-              className="rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900"
-            />
-          </div>
-        </div>
-
-        <div className="max-h-[520px] overflow-y-auto p-4 space-y-2">
-          {filteredMovements.length === 0 && (
-            <p className="text-sm text-gray-500 light:text-gray-600">Nenhuma movimentacao para os filtros selecionados.</p>
-          )}
-
-          {filteredMovements.map(movement => (
-            <div key={movement.id} className="rounded-lg border border-[#2a2a2a] light:border-gray-200 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm text-white dark:text-white light:text-gray-900">{movement.product}</p>
-                <span className={`text-xs px-2 py-1 rounded-full ${movementTypeClass[movement.type]}`}>
-                  {movementTypeLabels[movement.type]}
-                </span>
+        {showMovementHistory && (
+          <div className="border-t border-[#222222] light:border-gray-200">
+            <div className="px-5 py-4 bg-[#0a0a0a] dark:bg-[#0a0a0a] light:bg-gray-50">
+              <h3 className="text-sm font-semibold !text-white dark:!text-white light:!text-gray-900 mb-3">Historico de movimentacoes</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <select
+                  value={movementTypeFilter}
+                  onChange={event => setMovementTypeFilter(event.target.value as 'ALL' | StockMovementType)}
+                  className="rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900"
+                >
+                  <option value="ALL">Todos os tipos</option>
+                  <option value="ENTRY">ENTRY</option>
+                  <option value="RESERVATION">RESERVATION</option>
+                  <option value="RELEASE">RELEASE</option>
+                  <option value="EXIT">EXIT</option>
+                </select>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={event => setStartDate(event.target.value)}
+                  className="rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900"
+                />
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={event => setEndDate(event.target.value)}
+                  className="rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900"
+                />
               </div>
-              <p className="text-xs text-gray-400 light:text-gray-600 mt-1">Quantidade: {movement.quantity}</p>
-              <p className="text-xs text-gray-500 mt-1">{movement.source}</p>
-              <p className="text-[11px] text-gray-500 mt-1">{toLocalDateTime(movement.createdAt)}</p>
             </div>
-          ))}
-        </div>
+
+            <div className="max-h-[400px] overflow-y-auto p-4 space-y-2 bg-[#0a0a0a] dark:bg-[#0a0a0a] light:bg-gray-50">
+              {filteredMovements.length === 0 && (
+                <p className="text-sm text-gray-500 light:text-gray-600">Nenhuma movimentacao para os filtros selecionados.</p>
+              )}
+
+              {filteredMovements.map(movement => (
+                <div key={movement.id} className="rounded-lg border border-[#2a2a2a] light:border-gray-200 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm text-white dark:text-white light:text-gray-900">{movement.product}</p>
+                    <span className={`text-xs px-2 py-1 rounded-full ${movementTypeClass[movement.type]}`}>
+                      {movementTypeLabels[movement.type]}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 light:text-gray-600 mt-1">Quantidade: {movement.quantity}</p>
+                  <p className="text-xs text-gray-500 mt-1">{movement.source}</p>
+                  <p className="text-[11px] text-gray-500 mt-1">{toLocalDateTime(movement.createdAt)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {editingProduct && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+            <div className="w-full max-w-2xl rounded-xl border border-[#2a2a2a] light:border-gray-300 bg-[#141414] dark:bg-[#141414] light:bg-white overflow-hidden">
+              <div className="px-5 py-4 border-b border-[#222222] light:border-gray-200 flex items-center justify-between">
+                <h3 className="text-base font-semibold text-white dark:text-white light:text-gray-900">Editar produto</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingProduct(null);
+                    setEditModalError('');
+                  }}
+                  className="text-sm px-2 py-1 rounded-md border border-[#2a2a2a] light:border-gray-300 text-gray-300 light:text-gray-700 hover:bg-[#1a1a1a] light:hover:bg-gray-100"
+                >
+                  Fechar
+                </button>
+              </div>
+
+              <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 light:text-gray-600">Código</label>
+                  <input
+                    type="text"
+                    value={editingProduct.codigo}
+                    onChange={event => setEditingProduct(current => (current ? { ...current, codigo: event.target.value } : null))}
+                    className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900 mt-1"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-400 light:text-gray-600">Descrição</label>
+                  <input
+                    type="text"
+                    value={editingProduct.produto}
+                    onChange={event => setEditingProduct(current => (current ? { ...current, produto: event.target.value } : null))}
+                    className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900 mt-1"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-400 light:text-gray-600">Total</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editingProduct.total}
+                    onChange={event => setEditingProduct(current => (current ? { ...current, total: event.target.value } : null))}
+                    className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900 mt-1"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-gray-400 light:text-gray-600">Reservado</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={editingProduct.reservado}
+                    onChange={event => setEditingProduct(current => (current ? { ...current, reservado: event.target.value } : null))}
+                    className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-2 text-xs text-white dark:text-white light:text-gray-900 mt-1"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="text-xs text-gray-400 light:text-gray-600">Foto</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={async event => {
+                      const file = event.target.files?.[0];
+                      if (!file) {
+                        return;
+                      }
+                      try {
+                        const foto = await fileToDataUrl(file);
+                        setEditingProduct(current => (current ? { ...current, fotoUrl: foto } : null));
+                      } catch {
+                        setEditModalError('Nao foi possivel carregar a foto do produto.');
+                      }
+                      event.target.value = '';
+                    }}
+                    className="w-full rounded-md bg-[#0f0f0f] dark:bg-[#0f0f0f] light:bg-gray-50 border border-[#2a2a2a] light:border-gray-300 px-2 py-1.5 text-xs text-white dark:text-white light:text-gray-900 mt-1 file:mr-2 file:border-0 file:bg-transparent file:text-xs file:text-gray-400"
+                  />
+                  {editingProduct.fotoUrl && (
+                    <img
+                      src={editingProduct.fotoUrl}
+                      alt="Foto do produto"
+                      className="mt-2 h-20 w-20 rounded-md object-cover border border-[#2a2a2a] light:border-gray-300"
+                    />
+                  )}
+                </div>
+              </div>
+
+              {editModalError && <p className="px-5 pb-2 text-xs text-red-400 light:text-red-700">{editModalError}</p>}
+
+              <div className="px-5 py-4 border-t border-[#222222] light:border-gray-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingProduct(null);
+                    setEditModalError('');
+                  }}
+                  className="text-xs px-3 py-2 rounded-md border border-[#2a2a2a] light:border-gray-300 text-gray-300 light:text-gray-700 hover:bg-[#1a1a1a] light:hover:bg-gray-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveProductFromModal}
+                  className="text-xs px-3 py-2 rounded-md bg-[#00ff66]/15 text-[#00ff66] light:bg-green-100 light:text-green-700 hover:bg-[#00ff66]/25 transition-colors"
+                >
+                  Salvar alterações
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
